@@ -8,7 +8,7 @@ pinprick is a CLI tool for GitHub Actions supply chain security. It pins action 
 - **Platform:** macOS, Linux
 - **Architecture:** Single binary CLI with four subcommands (`audit`, `completions`, `pin`, `update`)
 - **License:** AGPL-3.0-only
-- **Dependencies:** clap (CLI), tokio (async), reqwest (HTTP), serde/serde_yml (parsing), regex (pattern matching)
+- **Dependencies:** clap (CLI), tokio (async), reqwest (HTTP), serde/serde_norway (parsing), regex (pattern matching)
 
 ## Repository structure
 
