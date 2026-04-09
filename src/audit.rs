@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use serde_yml::Value;
+use serde_norway::Value;
 use std::collections::HashSet;
 use std::path::Path;
 use std::process::ExitCode;
@@ -149,7 +149,7 @@ fn extract_run_blocks(path: &Path) -> Result<Vec<(usize, String)>> {
     let content =
         std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     let yaml: Value =
-        serde_yml::from_str(&content).with_context(|| format!("parsing {}", path.display()))?;
+        serde_norway::from_str(&content).with_context(|| format!("parsing {}", path.display()))?;
 
     let mut blocks = Vec::new();
 
@@ -459,7 +459,7 @@ async fn scan_action_source(
         let source_label = format!("{} ({path})", action.full_name());
 
         if is_action_yml {
-            if let Ok(yaml) = serde_yml::from_str::<Value>(&content) {
+            if let Ok(yaml) = serde_norway::from_str::<Value>(&content) {
                 scan_action_yml_runs(&yaml, &source_label, &action_name, findings);
             }
         } else if is_js {
