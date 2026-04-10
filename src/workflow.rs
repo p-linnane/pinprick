@@ -41,6 +41,9 @@ static USES_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(\s*-?\s*uses:\s*)([^\s@]+)@(\S+?)(\s*#\s*(.+?))?\s*$").unwrap()
 });
 
+static RUN_BLOCK_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\s*)(?:-\s+)?run\s*:\s*[|>][0-9+\-]*\s*$").unwrap());
+
 /// Parse a single line into an ActionRef, if it's a `uses:` line with an external action.
 pub fn parse_uses_line(line: &str, line_number: usize) -> Option<ActionRef> {
     let caps = USES_RE.captures(line)?;
@@ -106,18 +109,44 @@ pub fn build_pinned_line(line: &str, sha: &str, original_tag: &str) -> Option<St
     Some(format!("{prefix}{action_path}@{sha} # {original_tag}"))
 }
 
+/// Scan workflow YAML text and return all external action references.
+///
+/// Lines inside `run:` block scalars are skipped so that shell heredocs and
+/// inline scripts can't false-match on literal `- uses:` text (e.g. a workflow
+/// that generates a test workflow on the fly).
+pub fn scan_content(content: &str) -> Vec<ActionRef> {
+    let mut refs = Vec::new();
+    let mut block_parent_col: Option<usize> = None;
+
+    for (i, line) in content.lines().enumerate() {
+        let line_num = i + 1;
+
+        if let Some(start_col) = block_parent_col {
+            let indent = line.chars().take_while(|c| *c == ' ').count();
+            if line.trim().is_empty() || indent > start_col {
+                continue;
+            }
+            block_parent_col = None;
+        }
+
+        if let Some(caps) = RUN_BLOCK_RE.captures(line) {
+            block_parent_col = Some(caps.get(1).unwrap().as_str().len());
+            continue;
+        }
+
+        if let Some(r) = parse_uses_line(line, line_num) {
+            refs.push(r);
+        }
+    }
+
+    refs
+}
+
 /// Scan a workflow file and return all external action references.
 pub fn scan_workflow(path: &Path) -> Result<Vec<ActionRef>> {
     let content =
         std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-
-    let refs: Vec<ActionRef> = content
-        .lines()
-        .enumerate()
-        .filter_map(|(i, line)| parse_uses_line(line, i + 1))
-        .collect();
-
-    Ok(refs)
+    Ok(scan_content(&content))
 }
 
 /// Find all workflow files in a repository.
@@ -277,6 +306,94 @@ mod tests {
         let r = parse_uses_line("      - uses: github/codeql-action/init@v3", 1).unwrap();
         assert_eq!(r.full_name(), "github/codeql-action/init");
         assert_eq!(r.owner_repo(), "github/codeql-action");
+    }
+
+    // ── scan_content: block scalar skipping ─────────────────────────────
+
+    #[test]
+    fn scan_skips_uses_inside_run_block() {
+        let yaml = r#"
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate workflow
+        run: |
+          cat > test.yml <<YAML
+          steps:
+            - uses: ${OWNER}/${REPO}@${SHA}
+          YAML
+      - uses: actions/setup-node@v4
+"#;
+        let refs = scan_content(yaml);
+        assert_eq!(refs.len(), 2);
+        assert_eq!(refs[0].full_name(), "actions/checkout");
+        assert_eq!(refs[1].full_name(), "actions/setup-node");
+    }
+
+    #[test]
+    fn scan_handles_block_scalar_chomping_indicators() {
+        // `|`, `|-`, `|+`, `>`, `>-`, `>+`, `|2`, etc. — all should trigger skip mode.
+        for marker in ["|", "|-", "|+", ">", ">-", ">+", "|2", "|2-", ">-2"] {
+            let yaml = format!(
+                "steps:\n  - run: {marker}\n      - uses: evil/action@v1\n  - uses: good/action@v2\n"
+            );
+            let refs = scan_content(&yaml);
+            assert_eq!(
+                refs.len(),
+                1,
+                "marker {marker:?} should skip the inner uses"
+            );
+            assert_eq!(refs[0].full_name(), "good/action");
+        }
+    }
+
+    #[test]
+    fn scan_inline_run_does_not_trigger_skip() {
+        // `run: echo foo` (no block scalar marker) is a flow scalar — don't skip.
+        let yaml = "steps:\n  - run: echo hello\n  - uses: actions/checkout@v4\n";
+        let refs = scan_content(yaml);
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].full_name(), "actions/checkout");
+    }
+
+    #[test]
+    fn scan_handles_blank_lines_inside_run_block() {
+        let yaml =
+            "steps:\n  - run: |\n      echo one\n\n      echo two\n  - uses: actions/checkout@v4\n";
+        let refs = scan_content(yaml);
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].full_name(), "actions/checkout");
+    }
+
+    #[test]
+    fn scan_exits_block_scalar_on_dedent() {
+        let yaml = "steps:\n  - run: |\n      echo shell\n  - uses: real/action@v1\n";
+        let refs = scan_content(yaml);
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].full_name(), "real/action");
+    }
+
+    #[test]
+    fn scan_multiple_run_blocks_in_one_file() {
+        let yaml = r#"
+jobs:
+  a:
+    steps:
+      - run: |
+          echo uses: fake/a@v1
+      - uses: real/a@v1
+  b:
+    steps:
+      - run: |
+          echo uses: fake/b@v1
+      - uses: real/b@v1
+"#;
+        let refs = scan_content(yaml);
+        assert_eq!(refs.len(), 2);
+        assert_eq!(refs[0].full_name(), "real/a");
+        assert_eq!(refs[1].full_name(), "real/b");
     }
 }
 
