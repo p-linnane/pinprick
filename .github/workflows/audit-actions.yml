@@ -131,17 +131,25 @@ jobs:
     needs: scan
     if: needs.scan.result == 'success' && !inputs.dry-run
     runs-on: ubuntu-slim
+    environment: starhaven
     permissions:
-      contents: write # required to push branch
-      pull-requests: write # required to create PR
+      contents: read
+      actions: read # required by download-artifact
     steps:
+      - name: Mint bot token
+        id: app-token
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
       - name: Set up authenticated remote
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           REPOSITORY: ${{ github.repository }}
         run: git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPOSITORY}.git"
 
@@ -163,15 +171,28 @@ jobs:
       - name: Create PR
         if: steps.diff.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          INPUT_ACTION: ${{ inputs.action }}
         run: |
-          BRANCH="chore/audited-actions-update-$(date +%Y%m%d)"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          BOT_USER="${APP_SLUG}[bot]"
+          BOT_ID=$(gh api "/users/${BOT_USER}" --jq .id)
+          git config user.name "${BOT_USER}"
+          git config user.email "${BOT_ID}+${BOT_USER}@users.noreply.github.com"
+
+          if [[ -n "${INPUT_ACTION}" ]]; then
+            SLUG="${INPUT_ACTION//\//-}"
+            BRANCH="chore/audited-actions-add-${SLUG}"
+            TITLE="chore(audited-actions): add ${INPUT_ACTION}"
+            BODY="Added \`${INPUT_ACTION}\` after a clean audit."
+          else
+            BRANCH="chore/audited-actions-update-$(date +%Y%m%d)"
+            TITLE="chore(audited-actions): update scanned actions"
+            BODY="Automated scan found new clean releases for tracked actions."
+          fi
+
           git checkout -b "${BRANCH}"
           git add audited-actions/
-          git commit -m "chore(audited-actions): update scanned actions"
+          git commit -s -m "${TITLE}"
           git push -u origin "${BRANCH}"
-          gh pr create \
-            --title "chore(audited-actions): update scanned actions" \
-            --body "Automated scan found new clean releases for tracked actions."
+          gh pr create --title "${TITLE}" --body "${BODY}"
