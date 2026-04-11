@@ -7,7 +7,12 @@ use crate::github::GitHubClient;
 use crate::output::{UpdateReport, UpdateResult};
 use crate::workflow::{self, RefType};
 
-pub async fn run(repo_root: &Path, apply: bool, json: bool) -> Result<ExitCode> {
+pub async fn run(
+    repo_root: &Path,
+    apply: bool,
+    json: bool,
+    only: Option<&str>,
+) -> Result<ExitCode> {
     let token = auth::require_token().await?;
     let client = GitHubClient::new(token);
 
@@ -29,6 +34,11 @@ pub async fn run(repo_root: &Path, apply: bool, json: bool) -> Result<ExitCode> 
 
         for action in &actions {
             if action.ref_type != RefType::Sha {
+                continue;
+            }
+            if let Some(pat) = only
+                && !action.owner_repo().contains(pat)
+            {
                 continue;
             }
             let current_tag = match &action.tag_comment {
@@ -91,6 +101,7 @@ pub async fn run(repo_root: &Path, apply: bool, json: bool) -> Result<ExitCode> 
                 latest_tag: latest.tag_name.clone(),
                 latest_sha: new_sha.clone(),
                 line: action.line_number,
+                release_url: latest.html_url.clone(),
             });
 
             if apply
