@@ -119,10 +119,15 @@ impl AuditedActions {
         entries.push(serde_json::json!({ "sha": sha, "tag": tag }));
 
         if std::fs::create_dir_all(&dir).is_ok() {
-            let _ = std::fs::write(
-                &path,
-                serde_json::to_string_pretty(&entries).unwrap_or_default(),
-            );
+            let lines: Vec<String> = entries
+                .iter()
+                .map(|e| {
+                    let sha = e["sha"].as_str().unwrap_or_default();
+                    let tag = e["tag"].as_str().unwrap_or_default();
+                    format!("  {{ \"sha\": \"{sha}\", \"tag\": \"{tag}\" }}")
+                })
+                .collect();
+            let _ = std::fs::write(&path, format!("[\n{}\n]\n", lines.join(",\n")));
         }
     }
 
