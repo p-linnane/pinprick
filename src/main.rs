@@ -59,6 +59,8 @@ enum Command {
         #[arg(long, conflicts_with = "json")]
         sarif: bool,
     },
+    /// Remove locally cached audit results
+    Clean,
     /// Generate shell completions
     Completions {
         /// Shell to generate completions for
@@ -110,6 +112,22 @@ async fn main() -> ExitCode {
         } => {
             let config = config::Config::load(path);
             audit::run(path, cli.json, *sarif, *verbose, &config).await
+        }
+        Command::Clean => {
+            let removed = match audited_actions::cache_dir() {
+                Some(dir) if dir.is_dir() => std::fs::remove_dir_all(&dir).is_ok(),
+                _ => false,
+            };
+
+            if cli.json {
+                let msg = serde_json::json!({ "cleaned": removed });
+                println!("{msg}");
+            } else if removed {
+                println!("Cache cleaned.");
+            } else {
+                println!("Nothing to clean.");
+            }
+            return ExitCode::SUCCESS;
         }
         Command::Completions { shell } => {
             clap_complete::generate(

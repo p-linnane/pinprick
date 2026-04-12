@@ -168,7 +168,7 @@ fn parse_entries(json: &str) -> HashSet<String> {
     entries.into_iter().map(|e| e.sha).collect()
 }
 
-fn cache_dir() -> Option<PathBuf> {
+pub fn cache_dir() -> Option<PathBuf> {
     let home = std::env::var("HOME").ok()?;
     Some(PathBuf::from(home).join(".cache/pinprick/audited"))
 }
