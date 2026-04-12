@@ -58,6 +58,7 @@ export default defineConfig({
             { label: 'pin', slug: 'commands/pin' },
             { label: 'update', slug: 'commands/update' },
             { label: 'audit', slug: 'commands/audit' },
+            { label: 'clean', slug: 'commands/clean' },
           ],
         },
         {

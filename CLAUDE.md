@@ -6,9 +6,9 @@ pinprick is a CLI tool for GitHub Actions supply chain security. It pins action 
 
 - **Language:** Rust (2024 edition)
 - **Platform:** macOS, Linux
-- **Architecture:** Single binary CLI with four subcommands (`audit`, `completions`, `pin`, `update`)
+- **Architecture:** Single binary CLI with five subcommands (`audit`, `clean`, `completions`, `pin`, `update`)
 - **License:** AGPL-3.0-only
-- **Dependencies:** clap (CLI), tokio (async), reqwest (HTTP), serde/serde_norway (parsing), regex (pattern matching)
+- **Dependencies:** clap/clap_complete (CLI), tokio (async), reqwest (HTTP), serde/serde_norway (parsing), regex (pattern matching), colored (terminal output), toml (config parsing)
 
 ## Repository structure
 
@@ -29,11 +29,12 @@ pinprick/
 │   ├── update.rs            # Update command: check pinned actions for newer releases
 │   └── workflow.rs           # Regex-based uses: line scanning, ActionRef types
 ├── audited-actions/          # Pre-audited action SHAs (bundled into binary)
+├── scripts/                  # Helper scripts (release notes formatting)
 ├── site/                     # Astro Starlight docs site (pinprick.rs)
 ├── justfile                  # Task runner (build, test, lint, check)
 ├── rustfmt.toml              # Rustfmt configuration (2024 style edition)
 ├── .github/
-│   ├── workflows/           # CI, CodeQL, zizmor, release, deploy-site
+│   ├── workflows/           # CI, CodeQL, zizmor, release, deploy-site, pinprick-audit, audit-actions
 │   ├── dependabot.yml       # Dependabot for GitHub Actions, Cargo, and npm
 │   └── FUNDING.yml
 └── .gitignore
@@ -43,9 +44,10 @@ pinprick/
 
 ### Commands
 
-- `pinprick pin [PATH]` — Scan `.github/workflows/*.yml`, resolve action tag refs to full SHAs via GitHub API, rewrite files with `@sha # tag` format. Skips already-pinned (SHA) refs. Warns on branch refs (`@main`) and sliding tags (`@v4`), resolving sliding tags to exact versions.
-- `pinprick update [PATH] [--apply]` — Check SHA-pinned actions for newer releases. Dry-run by default, `--apply` to write changes.
-- `pinprick audit [PATH]` — Scan for runtime fetch patterns that bypass pinning. Without a GitHub token, scans only local `run:` blocks. With a token, also fetches and scans action source code (JS/TS, Python, Dockerfiles, action.yml).
+- `pinprick pin [PATH] [--dry-run]` — Scan `.github/workflows/*.yml`, resolve action tag refs to full SHAs via GitHub API, rewrite files with `@sha # tag` format. Skips already-pinned (SHA) refs. Warns on branch refs (`@main`) and sliding tags (`@v4`), resolving sliding tags to exact versions. `--dry-run` previews changes without writing and exits 1 when there are unpinned actions.
+- `pinprick update [PATH] [--apply] [--only PATTERN]` — Check SHA-pinned actions for newer releases. Dry-run by default, `--apply` to write changes. `--only` restricts the check to actions whose `owner/repo` contains the given substring.
+- `pinprick audit [PATH] [--verbose] [--sarif]` — Scan for runtime fetch patterns that bypass pinning. Without a GitHub token, scans only local `run:` blocks. With a token, also fetches and scans action source code (JS/TS, Python, Dockerfiles, action.yml). `--verbose` shows allowed matches. `--sarif` outputs SARIF 2.1.0 for GitHub code scanning.
+- `pinprick clean` — Remove locally cached audit results (`~/.cache/pinprick/audited/`).
 - `pinprick completions <SHELL>` — Generate shell completions for bash, zsh, fish, etc.
 
 ### Global flags
@@ -56,7 +58,7 @@ pinprick/
 
 ### YAML handling
 
-**Critical design decision:** workflow files are never round-tripped through a YAML parser for writing. `uses:` lines have a rigid single-line format — regex capture groups replace the ref while preserving leading whitespace, indentation, and surrounding comments. `serde_yaml` is only used for read-only extraction of `run:` block contents during audit.
+**Critical design decision:** workflow files are never round-tripped through a YAML parser for writing. `uses:` lines have a rigid single-line format — regex capture groups replace the ref while preserving leading whitespace, indentation, and surrounding comments. `serde_norway` is only used for read-only extraction of `run:` block contents during audit.
 
 ### GitHub auth
 
@@ -103,6 +105,7 @@ Checksum verification: findings followed within 3 lines by `sha256sum`, `shasum`
 - **codeql.yml** — CodeQL security analysis on push to main
 - **deploy-site.yml** — Build and deploy Astro site to Cloudflare Workers
 - **release.yml** — Manual dispatch: build cross-platform binaries (linux-amd64, linux-arm64, darwin-arm64), create GitHub release with build provenance attestations, publish the crate to crates.io
+- **pinprick-audit.yml** — Run pinprick audit on its own workflows with SARIF upload
 - **zizmor.yml** — GitHub Actions security audit on push to main
 
 ## Commit conventions

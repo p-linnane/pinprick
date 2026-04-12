@@ -47,17 +47,26 @@ All commands default to the current directory. Pass a path to target a different
 # Pin action tags to full SHAs
 pinprick pin
 
+# Preview without writing
+pinprick pin --dry-run
+
 # Check pinned actions for newer releases (dry-run)
 pinprick update
 
 # Apply updates
 pinprick update --apply
 
+# Only check a specific action or org
+pinprick update --only actions/checkout
+
 # Audit for runtime fetch patterns that bypass pinning
 pinprick audit
 
 # Target a specific repo
 pinprick audit /path/to/repo
+
+# Clear locally cached audit results
+pinprick clean
 
 # Generate shell completions
 pinprick completions zsh
@@ -108,6 +117,15 @@ HIGH  .github/workflows/ci.yml:42
 ```
 
 Without a GitHub token, audit scans local `run:` blocks only. With a token (via `GITHUB_TOKEN` or `gh auth`), it also fetches and scans action source code — JavaScript, Python, Dockerfiles, and composite action steps.
+
+### Clean
+
+Remove locally cached audit results (`~/.cache/pinprick/audited/`):
+
+```
+$ pinprick clean
+Cache cleaned.
+```
 
 ## What the audit detects
 

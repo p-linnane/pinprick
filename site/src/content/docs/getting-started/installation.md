@@ -9,7 +9,13 @@ description: How to install pinprick.
 brew install p-linnane/tap/pinprick
 ```
 
-## From source
+## crates.io
+
+```bash
+cargo install pinprick
+```
+
+## From source (unreleased HEAD)
 
 ```bash
 cargo install --git https://github.com/p-linnane/pinprick
