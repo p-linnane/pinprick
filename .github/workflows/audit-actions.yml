@@ -10,11 +10,11 @@ on:
         required: false
         default: ""
         type: string
-      dry-run:
-        description: "Log what would be added without committing"
-        required: true
-        default: true
-        type: boolean
+      ref:
+        description: "Tag or SHA to audit (e.g. v4.2.0). Defaults to the latest release."
+        required: false
+        default: ""
+        type: string
 
 defaults:
   run:
@@ -55,8 +55,8 @@ jobs:
       - name: Scan for new releases
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DRY_RUN: ${{ inputs.dry-run || 'false' }}
           INPUT_ACTION: ${{ inputs.action }}
+          INPUT_REF: ${{ inputs.ref }}
         run: |
           UPDATED=0
           if [[ -n "${INPUT_ACTION}" ]]; then
@@ -76,21 +76,45 @@ jobs:
             REPO=$(basename "${JSON_FILE}" .json)
             echo "--- ${OWNER}/${REPO} ---"
 
-            LATEST=$(gh api "repos/${OWNER}/${REPO}/releases/latest" --jq '.tag_name' 2>/dev/null || echo "")
-            if [[ -z "${LATEST}" ]]; then
-              echo "  No releases found, skipping"
-              continue
-            fi
+            if [[ -n "${INPUT_REF}" && -n "${INPUT_ACTION}" ]]; then
+              TAG="${INPUT_REF}"
+              if [[ "${TAG}" =~ ^[0-9a-f]{40}$ ]] || [[ "${TAG}" =~ ^[0-9a-f]{7}$ ]]; then
+                TAG_SHA=$(gh api "repos/${OWNER}/${REPO}/commits/${TAG}" --jq '.sha' 2>/dev/null || echo "")
+                if [[ -z "${TAG_SHA}" ]]; then
+                  echo "  Could not resolve SHA '${TAG}', skipping"
+                  continue
+                fi
+                TAG="sha:${TAG_SHA:0:7}"
+              else
+                TAG_SHA=$(gh api "repos/${OWNER}/${REPO}/git/ref/tags/${TAG}" --jq '.object.sha' 2>/dev/null || echo "")
+                if [[ -z "${TAG_SHA}" ]]; then
+                  echo "  Could not resolve ref '${TAG}', skipping"
+                  continue
+                fi
+                OBJ_TYPE=$(gh api "repos/${OWNER}/${REPO}/git/ref/tags/${TAG}" --jq '.object.type' 2>/dev/null || echo "commit")
+                if [[ "${OBJ_TYPE}" == "tag" ]]; then
+                  TAG_SHA=$(gh api "repos/${OWNER}/${REPO}/git/tags/${TAG_SHA}" --jq '.object.sha' 2>/dev/null || echo "${TAG_SHA}")
+                fi
+              fi
+              LATEST="${TAG}"
+              LATEST_SHA="${TAG_SHA}"
+            else
+              LATEST=$(gh api "repos/${OWNER}/${REPO}/releases/latest" --jq '.tag_name' 2>/dev/null || echo "")
+              if [[ -z "${LATEST}" ]]; then
+                echo "  No releases found, skipping"
+                continue
+              fi
 
-            LATEST_SHA=$(gh api "repos/${OWNER}/${REPO}/git/ref/tags/${LATEST}" --jq '.object.sha' 2>/dev/null || echo "")
-            if [[ -z "${LATEST_SHA}" ]]; then
-              echo "  Could not resolve ${LATEST}, skipping"
-              continue
-            fi
+              LATEST_SHA=$(gh api "repos/${OWNER}/${REPO}/git/ref/tags/${LATEST}" --jq '.object.sha' 2>/dev/null || echo "")
+              if [[ -z "${LATEST_SHA}" ]]; then
+                echo "  Could not resolve ${LATEST}, skipping"
+                continue
+              fi
 
-            OBJ_TYPE=$(gh api "repos/${OWNER}/${REPO}/git/ref/tags/${LATEST}" --jq '.object.type' 2>/dev/null || echo "commit")
-            if [[ "${OBJ_TYPE}" == "tag" ]]; then
-              LATEST_SHA=$(gh api "repos/${OWNER}/${REPO}/git/tags/${LATEST_SHA}" --jq '.object.sha' 2>/dev/null || echo "${LATEST_SHA}")
+              OBJ_TYPE=$(gh api "repos/${OWNER}/${REPO}/git/ref/tags/${LATEST}" --jq '.object.type' 2>/dev/null || echo "commit")
+              if [[ "${OBJ_TYPE}" == "tag" ]]; then
+                LATEST_SHA=$(gh api "repos/${OWNER}/${REPO}/git/tags/${LATEST_SHA}" --jq '.object.sha' 2>/dev/null || echo "${LATEST_SHA}")
+              fi
             fi
 
             if jq -e ".[] | select(.sha == \"${LATEST_SHA}\")" "${JSON_FILE}" > /dev/null 2>&1; then
@@ -98,7 +122,7 @@ jobs:
               continue
             fi
 
-            echo "  New release: ${LATEST} (${LATEST_SHA:0:8})"
+            echo "  New release: ${LATEST} (${LATEST_SHA:0:7})"
 
             TMPDIR=$(mktemp -d)
             mkdir -p "${TMPDIR}/.github/workflows"
@@ -114,14 +138,12 @@ jobs:
 
             if ./target/debug/pinprick --json audit "${TMPDIR}" 2>/dev/null; then
               echo "  Clean — adding ${LATEST}"
-              if [[ "${DRY_RUN}" == "false" ]]; then
-                jq -r --arg sha "${LATEST_SHA}" --arg tag "${LATEST}" '
-                  (if any(.[]; .sha == $sha) then . else [{sha: $sha, tag: $tag}] + . end) as $u |
-                  "[\n" + ([$u[] | "  { \"sha\": \"\(.sha)\", \"tag\": \"\(.tag)\" }"] | join(",\n")) + "\n]"
-                ' "${JSON_FILE}" > "${JSON_FILE}.tmp"
-                mv "${JSON_FILE}.tmp" "${JSON_FILE}"
-                UPDATED=1
-              fi
+              jq -r --arg sha "${LATEST_SHA}" --arg tag "${LATEST}" '
+                (if any(.[]; .sha == $sha) then . else [{sha: $sha, tag: $tag}] + . end) as $u |
+                "[\n" + ([$u[] | "  { \"sha\": \"\(.sha)\", \"tag\": \"\(.tag)\" }"] | join(",\n")) + "\n]"
+              ' "${JSON_FILE}" > "${JSON_FILE}.tmp"
+              mv "${JSON_FILE}.tmp" "${JSON_FILE}"
+              UPDATED=1
             else
               echo "  Findings detected — skipping ${LATEST}"
             fi
@@ -141,7 +163,7 @@ jobs:
   update:
     name: Update
     needs: scan
-    if: needs.scan.result == 'success' && !inputs.dry-run
+    if: needs.scan.result == 'success'
     runs-on: ubuntu-slim
     environment:
       name: starhaven
@@ -207,13 +229,12 @@ jobs:
 
           COMMIT_BODY="Signed-off-by: ${BOT_USER} <${BOT_ID}+${BOT_USER}@users.noreply.github.com>"
 
-          # On a manual dispatch, credit the human who clicked Run workflow
-          # as a co-author. Scheduled cron runs have no dispatcher and keep
-          # the sign-off-only body. Trailer lines are contiguous (no blank
-          # line between) so `git interpret-trailers` parses both.
+          # Trailer lines must be contiguous (no blank line between) so
+          # `git interpret-trailers` parses both.
           if [[ "${EVENT_NAME}" == "workflow_dispatch" && -n "${TRIGGERING_ACTOR}" ]]; then
-            ACTOR_ID=$(gh api "/users/${TRIGGERING_ACTOR}" --jq .id)
-            COAUTHOR="Co-authored-by: ${TRIGGERING_ACTOR} <${ACTOR_ID}+${TRIGGERING_ACTOR}@users.noreply.github.com>"
+            ACTOR_NAME=$(gh api "/users/${TRIGGERING_ACTOR}" --jq '.name // .login')
+            ACTOR_EMAIL=$(gh api "/users/${TRIGGERING_ACTOR}" --jq '.email // "\(.id)+\(.login)@users.noreply.github.com"')
+            COAUTHOR="Co-authored-by: ${ACTOR_NAME} <${ACTOR_EMAIL}>"
             COMMIT_BODY="${COMMIT_BODY}"$'\n'"${COAUTHOR}"
           fi
 

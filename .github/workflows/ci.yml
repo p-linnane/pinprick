@@ -222,7 +222,7 @@ jobs:
             while IFS= read -r ENTRY; do
               SHA=$(echo "${ENTRY}" | jq -r '.sha')
               TAG=$(echo "${ENTRY}" | jq -r '.tag')
-              echo "  Verifying ${TAG} (${SHA:0:8})..."
+              echo "  Verifying ${TAG} (${SHA:0:7})..."
 
               TMPDIR=$(mktemp -d)
               mkdir -p "${TMPDIR}/.github/workflows"

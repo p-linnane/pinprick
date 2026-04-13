@@ -719,7 +719,7 @@ fn scan_action_yml_runs(
 }
 
 fn short_sha(sha: &str) -> &str {
-    if sha.len() >= 8 { &sha[..8] } else { sha }
+    if sha.len() >= 7 { &sha[..7] } else { sha }
 }
 
 #[cfg(test)]
