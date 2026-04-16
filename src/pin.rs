@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::collections::HashMap;
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -17,6 +18,8 @@ pub async fn run(repo_root: &Path, json: bool, apply: bool) -> Result<ExitCode> 
         skipped: Vec::new(),
         applied: apply,
     };
+
+    let mut resolve_cache: HashMap<String, (String, String)> = HashMap::new();
 
     for file in &files {
         let display_name = workflow::display_path(file, repo_root);
@@ -39,6 +42,9 @@ pub async fn run(repo_root: &Path, json: bool, apply: bool) -> Result<ExitCode> 
                     });
                 }
                 RefType::SlidingTag | RefType::Tag => {
+                    let cache_key =
+                        format!("{}/{}@{}", action.owner, action.repo, action.ref_string);
+
                     if !json {
                         eprint!(
                             "  Resolving {}@{}...",
@@ -46,22 +52,43 @@ pub async fn run(repo_root: &Path, json: bool, apply: bool) -> Result<ExitCode> 
                             action.ref_string
                         );
                     }
-                    match client
-                        .resolve_tag(&action.owner, &action.repo, &action.ref_string)
-                        .await
-                    {
-                        Ok(sha) => {
-                            let tag = client
-                                .find_exact_tag(
-                                    &action.owner,
-                                    &action.repo,
-                                    &sha,
-                                    &action.ref_string,
-                                )
-                                .await;
-                            if !json {
-                                eprintln!(" done");
+
+                    let resolved = if let Some(hit) = resolve_cache.get(&cache_key) {
+                        if !json {
+                            eprintln!(" cached");
+                        }
+                        Ok(hit.clone())
+                    } else {
+                        match client
+                            .resolve_tag(&action.owner, &action.repo, &action.ref_string)
+                            .await
+                        {
+                            Ok(sha) => {
+                                let tag = client
+                                    .find_exact_tag(
+                                        &action.owner,
+                                        &action.repo,
+                                        &sha,
+                                        &action.ref_string,
+                                    )
+                                    .await;
+                                if !json {
+                                    eprintln!(" done");
+                                }
+                                resolve_cache.insert(cache_key, (sha.clone(), tag.clone()));
+                                Ok((sha, tag))
                             }
+                            Err(e) => {
+                                if !json {
+                                    eprintln!(" failed");
+                                }
+                                Err(e)
+                            }
+                        }
+                    };
+
+                    match resolved {
+                        Ok((sha, tag)) => {
                             if action.ref_type == RefType::SlidingTag {
                                 report.skipped.push(PinSkip {
                                     file: workflow::display_path(file, repo_root),
@@ -85,9 +112,6 @@ pub async fn run(repo_root: &Path, json: bool, apply: bool) -> Result<ExitCode> 
                             }
                         }
                         Err(e) => {
-                            if !json {
-                                eprintln!(" failed");
-                            }
                             report.skipped.push(PinSkip {
                                 file: workflow::display_path(file, repo_root),
                                 action: format!("{}@{}", action.full_name(), action.ref_string),

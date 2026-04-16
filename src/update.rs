@@ -1,9 +1,10 @@
 use anyhow::Result;
+use std::collections::HashMap;
 use std::path::Path;
 use std::process::ExitCode;
 
 use crate::auth;
-use crate::github::GitHubClient;
+use crate::github::{GitHubClient, Release};
 use crate::output::{UpdateReport, UpdateResult};
 use crate::workflow::{self, RefType};
 
@@ -22,6 +23,10 @@ pub async fn run(
         up_to_date: 0,
         applied: apply,
     };
+
+    let mut releases_cache: HashMap<String, Vec<Release>> = HashMap::new();
+    let mut releases_failed: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut tag_sha_cache: HashMap<String, String> = HashMap::new();
 
     for file in &files {
         let display_name = workflow::display_path(file, repo_root);
@@ -50,18 +55,35 @@ pub async fn run(
                 eprint!("  Checking {}@{}...", action.full_name(), current_tag);
             }
 
-            let releases = match client.list_releases(&action.owner, &action.repo).await {
-                Ok(r) => {
-                    if !json {
-                        eprintln!(" done");
-                    }
-                    r
+            let owner_repo = action.owner_repo();
+            if releases_failed.contains(&owner_repo) {
+                if !json {
+                    eprintln!(" skipped");
                 }
-                Err(_) => {
-                    if !json {
-                        eprintln!(" failed");
+                continue;
+            }
+
+            let releases = if let Some(cached) = releases_cache.get(&owner_repo) {
+                if !json {
+                    eprintln!(" cached");
+                }
+                cached.clone()
+            } else {
+                match client.list_releases(&action.owner, &action.repo).await {
+                    Ok(r) => {
+                        if !json {
+                            eprintln!(" done");
+                        }
+                        releases_cache.insert(owner_repo.clone(), r.clone());
+                        r
                     }
-                    continue;
+                    Err(_) => {
+                        if !json {
+                            eprintln!(" failed");
+                        }
+                        releases_failed.insert(owner_repo);
+                        continue;
+                    }
                 }
             };
 
@@ -105,12 +127,20 @@ pub async fn run(
                 continue;
             }
 
-            let new_sha = match client
-                .resolve_tag(&action.owner, &action.repo, &latest.tag_name)
-                .await
-            {
-                Ok(sha) => sha,
-                Err(_) => continue,
+            let tag_key = format!("{}@{}", owner_repo, latest.tag_name);
+            let new_sha = if let Some(cached) = tag_sha_cache.get(&tag_key) {
+                cached.clone()
+            } else {
+                match client
+                    .resolve_tag(&action.owner, &action.repo, &latest.tag_name)
+                    .await
+                {
+                    Ok(sha) => {
+                        tag_sha_cache.insert(tag_key, sha.clone());
+                        sha
+                    }
+                    Err(_) => continue,
+                }
             };
 
             report.updates.push(UpdateResult {
