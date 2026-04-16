@@ -44,7 +44,7 @@ struct MatchingRef {
     object: GitObject,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Release {
     pub tag_name: String,
     pub draft: bool,
