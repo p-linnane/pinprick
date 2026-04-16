@@ -153,17 +153,12 @@ pub async fn run(
     }
 }
 
-/// Simple version comparison: extract numeric components and compare.
+/// Simple version comparison: extract numeric components, then use the
+/// presence of a pre-release suffix as a tie-breaker so that a stable release
+/// sorts newer than a pre-release with the same numeric prefix.
 fn is_newer(current: &str, candidate: &str) -> bool {
-    let parse = |s: &str| -> Vec<u64> {
-        s.trim_start_matches('v')
-            .split('.')
-            .filter_map(|p| p.parse().ok())
-            .collect()
-    };
-
-    let cur = parse(current);
-    let cand = parse(candidate);
+    let (cur, cur_pre) = parse_version(current);
+    let (cand, cand_pre) = parse_version(candidate);
 
     // Compare component by component
     for (c, n) in cur.iter().zip(cand.iter()) {
@@ -174,8 +169,33 @@ fn is_newer(current: &str, candidate: &str) -> bool {
             return false;
         }
     }
-    // If equal so far, longer version with more components is "newer"
-    cand.len() > cur.len()
+    // If numeric prefixes match up to the shorter length, the longer one wins —
+    // except a pre-release tail like `-rc1` is not more components, it's less.
+    if cand.len() != cur.len() {
+        return cand.len() > cur.len();
+    }
+    // Exactly equal numerically: a stable release is newer than a pre-release.
+    match (cur_pre, cand_pre) {
+        (true, false) => true,
+        (false, true) => false,
+        _ => false,
+    }
+}
+
+/// Parse a version string into (numeric components, has pre-release suffix).
+/// Semver `-suffix` and `+build` tails are stripped before the numeric split.
+fn parse_version(s: &str) -> (Vec<u64>, bool) {
+    let s = s.trim_start_matches('v');
+    let (head, has_suffix) = match s.split_once('-') {
+        Some((before, _)) => (before, true),
+        None => (s, false),
+    };
+    let head = head.split_once('+').map(|(b, _)| b).unwrap_or(head);
+    let parts = head
+        .split('.')
+        .filter_map(|p| p.parse::<u64>().ok())
+        .collect();
+    (parts, has_suffix)
 }
 
 #[cfg(test)]
@@ -236,9 +256,28 @@ mod tests {
     }
 
     #[test]
-    fn prerelease_suffix_ignored() {
-        // "rc1" is not numeric, so filter_map drops it: v1.2.3-rc1 → [1,2,3]
+    fn prerelease_is_older_than_stable_same_numeric() {
         assert!(!is_newer("v1.2.3", "v1.2.3-rc1"));
+        assert!(is_newer("v1.2.3-rc1", "v1.2.3"));
+    }
+
+    #[test]
+    fn two_prereleases_same_numeric_are_equal() {
+        // Conservative: we don't try to order rc1 vs rc2, so neither is newer.
+        assert!(!is_newer("v1.2.3-rc1", "v1.2.3-rc2"));
+        assert!(!is_newer("v1.2.3-rc2", "v1.2.3-rc1"));
+    }
+
+    #[test]
+    fn numeric_bump_beats_prerelease_tail() {
+        assert!(is_newer("v1.2.3-rc1", "v1.2.4"));
+        assert!(!is_newer("v1.2.4", "v1.2.3-rc1"));
+    }
+
+    #[test]
+    fn build_metadata_stripped() {
+        assert!(!is_newer("v1.2.3+build.5", "v1.2.3+build.9"));
+        assert!(is_newer("v1.2.3+build.9", "v1.2.4+build.1"));
     }
 
     #[test]
