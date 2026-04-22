@@ -32,7 +32,7 @@ jobs:
         id: bump
         run: |
           # Tools tracked in ci.yml. Each entry: crate name on crates.io.
-          TOOLS=("typos-cli" "cargo-deny")
+          TOOLS=("typos-cli" "cargo-deny" "cargo-nextest" "cargo-llvm-cov")
           # crates.io rejects API requests without a descriptive User-Agent (403).
           UA="pinprick-ci (https://github.com/${GITHUB_REPOSITORY})"
           CHANGED=0

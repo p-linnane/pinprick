@@ -38,9 +38,10 @@ jobs:
           EVENT_ACTION: ${{ github.event.action }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
-          # Push to main: run lint to warm the cache.
+          # Push to main: run lint to warm the cache, and Coverage so
+          # Codecov has a baseline for PR comparisons.
           if [[ "${EVENT_NAME}" == "push" ]]; then
-            echo 'matrix=[{"name":"Lint","check":"lint","runner":"ubuntu-latest"}]' >> "${GITHUB_OUTPUT}"
+            echo 'matrix=[{"name":"Lint","check":"lint","runner":"ubuntu-latest"},{"name":"Coverage","check":"coverage","runner":"ubuntu-latest","environment":"codecov"}]' >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
@@ -60,6 +61,7 @@ jobs:
             MATRIX+=',{"name":"Test (Linux)","check":"test","runner":"ubuntu-latest"}'
             MATRIX+=',{"name":"Test (Linux ARM)","check":"test","runner":"ubuntu-22.04-arm"}'
             MATRIX+=',{"name":"Test (macOS)","check":"test","runner":"macos-26"}'
+            MATRIX+=',{"name":"Coverage","check":"coverage","runner":"ubuntu-latest","environment":"codecov"}'
           fi
 
           # Audited-actions changes: verify all entries
@@ -69,7 +71,7 @@ jobs:
 
           # Site or audited-actions changes: format check + build
           if echo "${CHANGED}" | grep -qE '^site/|^audited-actions/'; then
-            MATRIX+=',{"name":"Site","check":"site","runner":"ubuntu-slim"}'
+            MATRIX+=',{"name":"Site","check":"site","runner":"ubuntu-slim","environment":"codecov"}'
           fi
 
           # Workflow changes: Actions security audit
@@ -83,6 +85,9 @@ jobs:
     name: ${{ matrix.name }}
     needs: generate-matrix
     runs-on: ${{ matrix.runner }}
+    environment:
+      name: ${{ matrix.environment }}
+      deployment: false
     permissions:
       contents: read
       pull-requests: read # required to fetch PR commits for conventional commit validation
@@ -100,7 +105,7 @@ jobs:
       # --- Cargo caches ---
 
       - name: Restore cargo build cache
-        if: matrix.check == 'lint' || matrix.check == 'test'
+        if: matrix.check == 'lint' || matrix.check == 'test' || matrix.check == 'coverage'
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
@@ -110,6 +115,15 @@ jobs:
             target/
           key: ${{ runner.os }}-${{ runner.arch }}-cargo-debug-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-${{ runner.arch }}-cargo-debug-
+
+      - name: Restore coverage tools cache
+        if: matrix.check == 'coverage'
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/bin/cargo-nextest
+            ~/.cargo/bin/cargo-llvm-cov
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-cov-tools-v1
 
       - name: Restore lint tools cache
         if: matrix.check == 'lint'
@@ -228,6 +242,49 @@ jobs:
         if: matrix.check == 'test'
         run: cargo test
 
+      # --- Coverage ---
+
+      - name: Add llvm-tools
+        if: matrix.check == 'coverage'
+        run: rustup component add llvm-tools-preview
+
+      - name: Install cargo-nextest
+        if: matrix.check == 'coverage'
+        run: cargo install cargo-nextest --locked --version 0.9.133
+
+      - name: Install cargo-llvm-cov
+        if: matrix.check == 'coverage'
+        run: cargo install cargo-llvm-cov --locked --version 0.8.5
+
+      - name: Run tests with coverage
+        if: matrix.check == 'coverage'
+        run: cargo llvm-cov nextest --profile ci --lcov --output-path lcov.info
+
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() && matrix.check == 'coverage' }}
+        uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe # v5.5.4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov.info
+          fail_ci_if_error: false
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() && matrix.check == 'coverage' }}
+        uses: codecov/test-results-action@0fa95f0e1eeaafde2c782583b36b28ad0d8c77d3 # v1.2.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: target/nextest/ci/junit.xml
+          fail_ci_if_error: false
+
+      - name: Save coverage tools cache
+        if: matrix.check == 'coverage' && github.event_name == 'push'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/bin/cargo-nextest
+            ~/.cargo/bin/cargo-llvm-cov
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-cov-tools-v1
+
       # --- Site ---
 
       - name: Setup Node
@@ -250,6 +307,8 @@ jobs:
         if: matrix.check == 'site'
         working-directory: site
         run: npm run build
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
       # --- Verify Audited Actions ---
 
@@ -314,7 +373,7 @@ jobs:
         if: matrix.check == 'zizmor'
         uses: zizmorcore/zizmor-action@b1d7e1fb5de872772f31590499237e7cce841e8e # v0.5.3
         with:
-          persona: pedantic
+          persona: auditor
 
   conclusion:
     name: conclusion
