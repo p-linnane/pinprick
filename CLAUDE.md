@@ -6,7 +6,7 @@ pinprick is a CLI tool for GitHub Actions supply chain security. It pins action 
 
 - **Language:** Rust (2024 edition)
 - **Platform:** macOS, Linux
-- **Architecture:** Single binary CLI with five subcommands (`audit`, `clean`, `completions`, `pin`, `update`)
+- **Architecture:** Single binary CLI with six subcommands (`audit`, `clean`, `completions`, `pin`, `score`, `update`)
 - **License:** AGPL-3.0-only
 - **Dependencies:** clap/clap_complete (CLI), tokio (async), reqwest (HTTP), serde/serde_norway (parsing), regex (pattern matching), colored (terminal output), toml (config parsing)
 
@@ -26,9 +26,11 @@ pinprick/
 │   ├── github.rs            # GitHub API client (tag→SHA, releases, file trees)
 │   ├── output.rs            # Human-readable (colored) and --json output formatting
 │   ├── pin.rs               # Pin command: resolve tags to SHAs, rewrite files
+│   ├── score.rs             # Score command: compute a posture grade per docs/scoring.md
 │   ├── update.rs            # Update command: check pinned actions for newer releases
 │   └── workflow.rs           # Regex-based uses: line scanning, ActionRef types
 ├── audited-actions/          # Pre-audited action SHAs (bundled into binary)
+├── docs/                     # Specs (scoring rubric, etc.) — source of truth for behaviors
 ├── scripts/                  # Helper scripts (release notes formatting)
 ├── site/                     # Astro Starlight docs site (pinprick.rs)
 ├── justfile                  # Task runner (build, test, lint, check)
@@ -47,6 +49,7 @@ pinprick/
 - `pinprick pin [PATH] [--write]` — Scan `.github/workflows/*.yml`, resolve action tag refs to full SHAs via GitHub API. Dry-run by default (exits 1 when there are unpinned actions). `--write` rewrites files with `@sha # tag` format. Skips already-pinned (SHA) refs. Warns on branch refs (`@main`) and sliding tags (`@v4`), resolving sliding tags to exact versions.
 - `pinprick update [PATH] [--write] [--only PATTERN]` — Check SHA-pinned actions for newer releases. Dry-run by default, `--write` to apply changes. `--only` restricts the check to actions whose `owner/repo` contains the given substring.
 - `pinprick audit [PATH] [--verbose] [--sarif]` — Scan for runtime fetch patterns that bypass pinning. Without a GitHub token, scans only local `run:` blocks. With a token, also fetches and scans action source code (JS/TS, Python, Dockerfiles, action.yml). `--verbose` shows allowed matches. `--sarif` outputs SARIF 2.1.0 for GitHub code scanning.
+- `pinprick score [PATH]` — Compute a supply-chain posture score (0–100, letter grade A–F) for a repository's workflows. Implements the public rubric in `docs/scoring.md`. v0.1.0 emits `pin.*` and `workflow.*` findings (offline, no token required). Exits 1 when any findings exist (matches `audit` for CI gating); outputs JSON with `--json`. Serves as the reference implementation MintMarq wraps.
 - `pinprick clean` — Remove locally cached audit results (`~/.cache/pinprick/audited/`).
 - `pinprick completions <SHELL>` — Generate shell completions for bash, zsh, fish, etc.
 
