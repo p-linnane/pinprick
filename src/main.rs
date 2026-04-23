@@ -6,6 +6,7 @@ mod config;
 mod github;
 mod output;
 mod pin;
+mod score;
 mod update;
 mod workflow;
 
@@ -76,6 +77,12 @@ enum Command {
         #[arg(long = "write")]
         apply: bool,
     },
+    /// Score a repository's Actions supply chain posture
+    Score {
+        /// Repository root
+        #[arg(default_value = ".")]
+        path: PathBuf,
+    },
     /// Check for updates to pinned actions
     Update {
         /// Repository root
@@ -138,6 +145,7 @@ async fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         Command::Pin { path, apply } => pin::run(path, cli.json, *apply).await,
+        Command::Score { path } => score::run(path, cli.json).await,
         Command::Update { path, apply, only } => {
             update::run(path, *apply, cli.json, only.as_deref()).await
         }
