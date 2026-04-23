@@ -5,7 +5,6 @@ import starlight from '@astrojs/starlight';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { codecovVitePlugin } from '@codecov/vite-plugin';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pinprickVersion =
@@ -22,18 +21,6 @@ export default defineConfig({
     define: {
       __PINPRICK_VERSION__: JSON.stringify(pinprickVersion),
     },
-    plugins: [
-      codecovVitePlugin({
-        enableBundleAnalysis: process.env.CODECOV_TOKEN !== undefined,
-        bundleName: 'pinprick-site',
-        uploadToken: process.env.CODECOV_TOKEN,
-        gitService: 'github',
-        telemetry: false,
-        uploadOverrides: {
-          compareSha: process.env.GH_COMPARE_SHA,
-        },
-      }),
-    ],
   },
   redirects: {
     '/': '/getting-started/introduction/',
