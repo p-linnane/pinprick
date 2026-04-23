@@ -42,7 +42,7 @@ jobs:
           # has a coverage baseline for PR comparisons, and Site so Codecov
           # has a bundle-analysis baseline.
           if [[ "${EVENT_NAME}" == "push" ]]; then
-            echo 'matrix=[{"name":"Lint","check":"lint","runner":"ubuntu-latest"},{"name":"Coverage","check":"coverage","runner":"ubuntu-latest","environment":"codecov"},{"name":"Site","check":"site","runner":"ubuntu-slim","environment":"codecov"}]' >> "${GITHUB_OUTPUT}"
+            echo 'matrix=[{"name":"Lint","check":"lint","runner":"ubuntu-latest"},{"name":"Coverage","check":"coverage","runner":"ubuntu-latest","environment":"codecov"},{"name":"Site","check":"site","runner":"ubuntu-slim","environment":"codecov","fetch_depth":"2"}]' >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
@@ -72,7 +72,7 @@ jobs:
 
           # Site or audited-actions changes: format check + build
           if echo "${CHANGED}" | grep -qE '^site/|^audited-actions/'; then
-            MATRIX+=',{"name":"Site","check":"site","runner":"ubuntu-slim","environment":"codecov"}'
+            MATRIX+=',{"name":"Site","check":"site","runner":"ubuntu-slim","environment":"codecov","fetch_depth":"2"}'
           fi
 
           # Workflow changes: Actions security audit
@@ -106,6 +106,7 @@ jobs:
       # --- Cargo caches ---
 
       - name: Restore cargo build cache
+        id: cargo-build-cache
         if: matrix.check == 'lint' || matrix.check == 'test' || matrix.check == 'coverage'
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
@@ -118,6 +119,7 @@ jobs:
           restore-keys: ${{ runner.os }}-${{ runner.arch }}-cargo-debug-
 
       - name: Restore coverage tools cache
+        id: cov-tools-cache
         if: matrix.check == 'coverage'
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
@@ -130,6 +132,7 @@ jobs:
           restore-keys: ${{ runner.os }}-${{ runner.arch }}-cargo-cov-tools-
 
       - name: Restore lint tools cache
+        id: lint-tools-cache
         if: matrix.check == 'lint'
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
@@ -221,7 +224,7 @@ jobs:
         run: cargo deny check
 
       - name: Save cargo build cache
-        if: matrix.check == 'lint' && github.event_name == 'push'
+        if: matrix.check == 'lint' && github.event_name == 'push' && steps.cargo-build-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
@@ -232,7 +235,7 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-cargo-debug-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Save lint tools cache
-        if: matrix.check == 'lint' && github.event_name == 'push'
+        if: matrix.check == 'lint' && github.event_name == 'push' && steps.lint-tools-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
@@ -284,7 +287,7 @@ jobs:
           report_type: test_results
 
       - name: Save coverage tools cache
-        if: matrix.check == 'coverage' && github.event_name == 'push'
+        if: matrix.check == 'coverage' && github.event_name == 'push' && steps.cov-tools-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
