@@ -38,11 +38,10 @@ jobs:
           EVENT_ACTION: ${{ github.event.action }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
-          # Push to main: run lint to warm the cache, Coverage so Codecov
-          # has a coverage baseline for PR comparisons, and Site so Codecov
-          # has a bundle-analysis baseline.
+          # Push to main: run lint to warm the cache, and Coverage so
+          # Codecov has a baseline for PR comparisons.
           if [[ "${EVENT_NAME}" == "push" ]]; then
-            echo 'matrix=[{"name":"Lint","check":"lint","runner":"ubuntu-latest"},{"name":"Coverage","check":"coverage","runner":"ubuntu-latest","environment":"codecov"},{"name":"Site","check":"site","runner":"ubuntu-slim","environment":"codecov","fetch_depth":"2"}]' >> "${GITHUB_OUTPUT}"
+            echo 'matrix=[{"name":"Lint","check":"lint","runner":"ubuntu-latest"},{"name":"Coverage","check":"coverage","runner":"ubuntu-latest","environment":"codecov"}]' >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
@@ -72,7 +71,7 @@ jobs:
 
           # Site or audited-actions changes: format check + build
           if echo "${CHANGED}" | grep -qE '^site/|^audited-actions/'; then
-            MATRIX+=',{"name":"Site","check":"site","runner":"ubuntu-slim","environment":"codecov","fetch_depth":"2"}'
+            MATRIX+=',{"name":"Site","check":"site","runner":"ubuntu-slim"}'
           fi
 
           # Workflow changes: Actions security audit
@@ -319,9 +318,6 @@ jobs:
         if: matrix.check == 'site'
         working-directory: site
         run: npm run build
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-          GH_COMPARE_SHA: ${{ github.event.before || github.event.pull_request.base.sha }}
 
       # --- Verify Audited Actions ---
 
