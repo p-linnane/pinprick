@@ -6,3 +6,6 @@
 max_concurrency = 20
 timeout = 20
 max_retries = 3
+
+# claude.ai returns 403 to automated link checkers
+exclude = ["https://claude.ai/.*"]
