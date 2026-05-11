@@ -200,11 +200,11 @@ jobs:
 
       - name: Install typos-cli
         if: matrix.check == 'lint'
-        run: cargo install typos-cli --locked --version 1.46.0
+        run: cargo install typos-cli --locked --version 1.46.1
 
       - name: Install cargo-deny
         if: matrix.check == 'lint'
-        run: cargo install cargo-deny --locked --version 0.19.4
+        run: cargo install cargo-deny --locked --version 0.19.5
 
       - name: Clippy
         if: matrix.check == 'lint'
@@ -262,7 +262,7 @@ jobs:
 
       - name: Install cargo-llvm-cov
         if: matrix.check == 'coverage'
-        run: cargo install cargo-llvm-cov --locked --version 0.8.5
+        run: cargo install cargo-llvm-cov --locked --version 0.8.6
 
       - name: Run tests with coverage
         if: matrix.check == 'coverage'
